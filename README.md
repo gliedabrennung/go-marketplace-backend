@@ -53,27 +53,6 @@ internal/<context>/
 
 Зависимости идут только внутрь и через `api`: `infrastructure` знает про `domain` и `application`, `application` знает про `domain`, `domain` не знает ни про что снаружи стандартной библиотеки и `shared/kernel`.
 
-## Применённые паттерны
-
-| Паттерн | Где | Зачем |
-|---------|-----|-------|
-| **DDD: агрегаты и фабрики** | `internal/*/domain/*.go` — `Place`, `CreateOffer`, `Accrue`, `StartSaga` и т. д. | Приватные поля, единственный вход через фабричную функцию — невалидное состояние агрегата невозможно скомпилировать |
-| **Value Objects** | `shared/kernel`: `Money`, `Quantity`, `BasisPoints`, типизированные `ID[T]` | Инварианты (валюта, неотрицательность) гарантированы типом, а не проверками в каждом месте использования |
-| **Repository** | `internal/*/domain/repository.go` + `infrastructure/{postgres,memory}` | Домен не знает о SQL; один и тот же контракт проверяется контрактными тестами против обеих реализаций |
-| **Unit of Work** | `internal/shared/platform/postgres/uow.go`, `application.UnitOfWork` в каждом контексте | Явная транзакционная граница вокруг одного агрегата на команду |
-| **CQRS** | `internal/*/application/{command,query}`, `shared/platform/cqrs` | Разделение команд и чтений; у команд — доменные инварианты, у запросов — read-model под конкретный экран |
-| **Decorator** | `shared/platform/cqrs/decorator.go` (`cqrs.Decorate`) | Трассировка, логирование и метрики вокруг любого обработчика без изменения его кода |
-| **Transactional Outbox + Dispatcher** | `shared/platform/outbox` | Событие пишется в той же транзакции, что и агрегат; отдельный процесс (`cmd/worker`) публикует его подписчикам с ретраями и backoff — без внешнего брокера |
-| **Inbox / дедупликация** | `shared/platform/inbox` | At-least-once доставка событий не создаёт повторных эффектов у подписчика |
-| **Saga (оркестрация)** | `internal/ordering/domain/saga.go` + `application/command` | Оформление заказа — 7 шагов через `inventory`, `pricing`, `payment` с сохранённым состоянием и идемпотентными компенсациями при сбое любого шага |
-| **Anticorruption Layer** | `internal/payment/infrastructure/psp/sandbox` | Модель платёжного провайдера (DTO эмулятора PSP) не протекает в домен `payment` — только через порт `application.Provider` |
-| **Strategy** | `pricing.DiscountRule` (скидки), `shipping.Tariffs` (доставка), `payment.Provider` (провайдер оплаты) | Новый вид скидки / способ доставки / провайдер — новая реализация интерфейса, без правки существующего кода |
-| **Specification** | `pricing.DiscountRule.IsApplicable`, `catalog` классификация атрибутов по дереву категорий | Комбинируемые бизнес-условия применимости правила |
-| **Idempotency Key** | `shared/platform/idempotency` (HTTP), ключи `intent:`/`capture:`/`cancel:`/`refund:` в PSP-клиенте | Повтор запроса (сетевой таймаут, повтор клиента) не создаёт второй заказ, платёж или списание |
-| **Optimistic Locking** | Поле `version` во всех агрегатах + `kernel.ErrConcurrentModification` | Конкурентные изменения одного агрегата обнаруживаются, а не перезаписывают друг друга |
-| **Circuit Breaker** | `shared/platform/breaker`, обёрнут вокруг HTTP-клиента PSP | Изоляция отказа внешнего провайдера, метрика `circuit_breaker_state` |
-| **Read Model / проекции** | `search` (Postgres FTS документы), `pricing.offer_prices`, `inventory` остатки | Данные для конкретного запроса денормализованы и обновляются подписчиками, а не JOIN'ами через границы контекстов |
-
 ## Технологический стек
 
 | Компонент | Технология | Почему |
@@ -112,14 +91,6 @@ curl localhost:8080/readyz
 docker compose -f deploy/docker-compose.yml --profile app up --build
 ```
 
-## Процессы
-
-| Бинарник | Назначение |
-|----------|-----------|
-| `cmd/api` | REST API, `/healthz`, `/readyz`; метрики на `METRICS_ADDR` |
-| `cmd/worker` | Диспетчер outbox, превью изображений, пакетный импорт офферов, индексация поиска, истечение резервов, проекции цен, продвижение и компенсации саги оформления, завершение доставленных заказов, начисление продавцам, очистка анонимных корзин, сверка платежей |
-| `cmd/migrate` | `up`, `down`, `reset`, `status`, `version` |
-
 ## Проверки
 
 ```bash
@@ -151,25 +122,3 @@ docs/context-map.md      карта контекстов и правило Share
 test/integration         интеграционные тесты (testcontainers)
 test/e2e, test/load      план на этап стабилизации
 ```
-
-## Ограниченные контексты
-
-| Контекст | Возможности | Контракт |
-|----------|-------------|----------|
-| `identity` | регистрация и вход по email/паролю (Argon2id) с подтверждением по ссылке, JWT ES256 + ротируемые refresh-токены с обнаружением повторного использования, список и отзыв сессий, блокировка пользователей, RBAC, лимиты попыток | [`docs/contracts/identity.md`](docs/contracts/identity.md) |
-| `seller` | заявка ТОО/ИП с проверкой БИН/ИИН и IBAN, документы, модерация, жизненный цикл `draft → pending_review → active ⇄ suspended → terminated`, сотрудники продавца, комиссии по категориям и индивидуальные, рейтинг с автоприостановкой | [`docs/contracts/seller.md`](docs/contracts/seller.md) |
-| `catalog` | дерево категорий с наследованием типизированных атрибутов, карточки товаров с модерацией, изображения через presigned URL с автогенерацией превью, группы вариантов, офферы продавцов, пакетная загрузка (CSV/XLSX/JSON) с отчётом об ошибках | [`docs/contracts/catalog.md`](docs/contracts/catalog.md) |
-| `search` | полнотекстовый поиск PostgreSQL с морфологией и исправлением опечаток, фасеты, сортировки, курсорная пагинация, индексация от событий, полная переиндексация без простоя | [`docs/contracts/search.md`](docs/contracts/search.md) |
-| `inventory` | остатки по SKU с резервами на 20 минут, подтверждение/отмена/истечение резервов, возвраты, append-only журнал движений, защита от oversell блокировкой строк | [`docs/contracts/inventory.md`](docs/contracts/inventory.md) |
-| `pricing` | цены офферов и «цена до скидки», акции (процент, фиксированная сумма, N за M) с целями по SKU/продавцу/категории, приоритеты и несуммируемые скидки, промокоды с лимитами | [`docs/contracts/pricing.md`](docs/contracts/pricing.md) |
-| `cart` | анонимная корзина по `X-Device-ID` со слиянием при входе, лимиты позиций и остатка, актуализация доступности и цен, промокод, разбивка по продавцам с доставкой, TTL 30 дней | [`docs/contracts/cart.md`](docs/contracts/cart.md) |
-| `ordering` | оформление из корзины с идемпотентностью, заказ с частями продавцов и историей статусов, сага оформления с персистентным состоянием, таймаутом и повтором оплаты, компенсациями и ручным разбором, отмена с возвратом средств и товара | [`docs/contracts/ordering.md`](docs/contracts/ordering.md) |
-| `payment` | порт PSP и встроенный эмулятор, hold/capture/cancel, частичные и полные возвраты, подписанные вебхуки с дедупликацией и allowlist, сохранённые способы оплаты (только токены), circuit breaker, ежесуточная сверка | [`docs/contracts/payment.md`](docs/contracts/payment.md) |
-| `shipping` | порт тарифов доставки; сейчас — фиксированный тариф вместо интеграции с логистикой | [`docs/contracts/shipping.md`](docs/contracts/shipping.md) |
-| `settlement` | начисление продавцу за вычетом комиссии по завершении заказа, отчёт за период; без реестра выплат | [`docs/contracts/settlement.md`](docs/contracts/settlement.md) |
-
-Полный список архитектурных решений — [`docs/adr`](docs/adr/README.md), карта связей между контекстами — [`docs/context-map.md`](docs/context-map.md).
-
-## Что дальше
-
-Не реализовано (осознанно, вне текущего объёма учебного проекта): контексты `review` (отзывы, возвраты) и `notification`, полная интеграция `shipping` с реальной службой доставки, реестр и выгрузка выплат в `settlement`. Порты под них уже определены (`shipping.api.Tariffs`, `payment.api.Payments` и т. д.), так что подключение — это новый адаптер, а не переделка существующего кода.
