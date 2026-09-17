@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "marketplace",
+      "credentials": [
+        {
+          "accessKey": "marketplace",
+          "secretKey": "marketplace-secret"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

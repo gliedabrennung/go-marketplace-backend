@@ -1,0 +1,291 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  build-tags:
+    - integration
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - revive
+    - gocyclo
+    - gosec
+    - bodyclose
+    - sqlclosecheck
+    - contextcheck
+    - errorlint
+    - depguard
+    - funlen
+    - unused
+    - ineffassign
+    - misspell
+    - nolintlint
+    - noctx
+    - rowserrcheck
+  settings:
+    gocyclo:
+      min-complexity: 15
+    funlen:
+      lines: 80
+      statements: -1
+    errorlint:
+      errorf: true
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: receiver-naming
+        - name: var-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: increment-decrement
+        - name: time-naming
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+    depguard:
+      rules:
+        domain-purity:
+          list-mode: strict
+          files:
+            - "**/internal/*/domain/**"
+            - "!$test"
+          allow:
+            - $gostd
+            - github.com/gliedabrennung/go-marketplace-backend/internal/shared/kernel
+          deny:
+            - pkg: github.com/jackc/pgx
+              desc: domain layer must not know about the database
+            - pkg: net/http
+              desc: domain layer must not know about transport
+            - pkg: encoding/json
+              desc: serialization belongs to adapters
+        kernel-purity:
+          list-mode: strict
+          files:
+            - "**/internal/shared/kernel/**"
+            - "!$test"
+          allow:
+            - $gostd
+        application-isolation:
+          files:
+            - "**/internal/*/application/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/identity/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/seller/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/catalog/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/inventory/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/pricing/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/cart/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/ordering/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/payment/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/shipping/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/settlement/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/review/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/search/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/notification/infrastructure
+              desc: application layer depends on ports only
+            - pkg: github.com/jackc/pgx
+              desc: application layer depends on ports only
+            - pkg: github.com/redis/go-redis
+              desc: application layer depends on ports only
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/shared/platform/postgres
+              desc: application layer depends on ports only
+        boundary-identity:
+          files:
+            - "**/internal/**"
+            - "!**/internal/identity/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/identity/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/identity/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/identity/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/identity/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/identity/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/identity/api or domain events
+        boundary-seller:
+          files:
+            - "**/internal/**"
+            - "!**/internal/seller/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/seller/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/seller/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/seller/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/seller/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/seller/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/seller/api or domain events
+        boundary-catalog:
+          files:
+            - "**/internal/**"
+            - "!**/internal/catalog/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/catalog/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/catalog/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/catalog/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/catalog/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/catalog/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/catalog/api or domain events
+        boundary-inventory:
+          files:
+            - "**/internal/**"
+            - "!**/internal/inventory/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/inventory/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/inventory/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/inventory/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/inventory/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/inventory/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/inventory/api or domain events
+        boundary-pricing:
+          files:
+            - "**/internal/**"
+            - "!**/internal/pricing/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/pricing/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/pricing/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/pricing/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/pricing/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/pricing/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/pricing/api or domain events
+        boundary-cart:
+          files:
+            - "**/internal/**"
+            - "!**/internal/cart/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/cart/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/cart/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/cart/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/cart/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/cart/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/cart/api or domain events
+        boundary-ordering:
+          files:
+            - "**/internal/**"
+            - "!**/internal/ordering/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/ordering/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/ordering/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/ordering/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/ordering/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/ordering/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/ordering/api or domain events
+        boundary-payment:
+          files:
+            - "**/internal/**"
+            - "!**/internal/payment/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/payment/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/payment/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/payment/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/payment/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/payment/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/payment/api or domain events
+        boundary-shipping:
+          files:
+            - "**/internal/**"
+            - "!**/internal/shipping/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/shipping/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/shipping/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/shipping/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/shipping/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/shipping/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/shipping/api or domain events
+        boundary-settlement:
+          files:
+            - "**/internal/**"
+            - "!**/internal/settlement/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/settlement/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/settlement/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/settlement/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/settlement/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/settlement/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/settlement/api or domain events
+        boundary-review:
+          files:
+            - "**/internal/**"
+            - "!**/internal/review/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/review/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/review/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/review/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/review/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/review/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/review/api or domain events
+        boundary-search:
+          files:
+            - "**/internal/**"
+            - "!**/internal/search/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/search/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/search/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/search/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/search/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/search/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/search/api or domain events
+        boundary-notification:
+          files:
+            - "**/internal/**"
+            - "!**/internal/notification/**"
+          deny:
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/notification/domain
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/notification/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/notification/application
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/notification/api or domain events
+            - pkg: github.com/gliedabrennung/go-marketplace-backend/internal/notification/infrastructure
+              desc: use github.com/gliedabrennung/go-marketplace-backend/internal/notification/api or domain events
+    gosec:
+      excludes:
+        - G115
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - funlen
+          - gosec
+          - noctx
+      - path: internal/payment/infrastructure/psp/sandbox/server\.go
+        linters:
+          - gosec
+        text: "G704|G710"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/gliedabrennung/go-marketplace-backend

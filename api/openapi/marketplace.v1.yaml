@@ -1,0 +1,3070 @@
+openapi: 3.1.0
+info:
+  title: Marketplace API
+  version: 1.0.0
+  description: Публичный REST API маркетплейса. Контракт является источником правды (contract-first).
+servers:
+  - url: https://api.marketplace.kz
+  - url: http://localhost:8080
+tags:
+  - name: service
+  - name: auth
+  - name: me
+  - name: identity-admin
+  - name: seller
+  - name: seller-admin
+  - name: seller-catalog
+  - name: catalog
+  - name: catalog-admin
+  - name: search
+  - name: search-admin
+  - name: inventory
+  - name: pricing
+  - name: pricing-admin
+  - name: cart
+  - name: orders
+  - name: seller-orders
+  - name: settlement
+  - name: payments
+  - name: support
+  - name: webhooks
+paths:
+  /healthz:
+    get:
+      tags: [service]
+      operationId: liveness
+      responses:
+        "200":
+          description: Процесс жив
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /readyz:
+    get:
+      tags: [service]
+      operationId: readiness
+      responses:
+        "200":
+          description: Инстанс готов принимать трафик
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: Зависимость недоступна или инстанс выводится из балансировки
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /api/v1/auth/email/register:
+    post:
+      tags: [auth]
+      operationId: registerWithEmail
+      description: Регистрирует покупателя и отправляет ссылку подтверждения. Не более 3 писем за 10 минут на email. Повторная регистрация неподтверждённого email выдаёт новую ссылку.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        "201":
+          description: Пользователь создан, письмо отправлено
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/v1/auth/email/confirm:
+    post:
+      tags: [auth]
+      operationId: confirmEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        "204": { description: Email подтверждён }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/auth/email/sign-in:
+    post:
+      tags: [auth]
+      operationId: signInWithEmail
+      description: Вход только с подтверждённым email. Не более 5 попыток за 15 минут на email.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+                device_name: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Tokens" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/v1/auth/token/refresh:
+    post:
+      tags: [auth]
+      operationId: refreshSession
+      description: Ротирует refresh-токен. Повторное использование старого токена отзывает сессию.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Tokens" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/auth/sign-out:
+    post:
+      tags: [auth]
+      operationId: signOut
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Текущая сессия отозвана }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/me:
+    get:
+      tags: [me]
+      operationId: getProfile
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Профиль
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/me/sessions:
+    get:
+      tags: [me]
+      operationId: listSessions
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Активные сессии
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Session" }
+                  page: { $ref: "#/components/schemas/PageInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/me/sessions/{id}:
+    delete:
+      tags: [me]
+      operationId: revokeSession
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "204": { description: Сессия отозвана }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/admin/users/{id}/block:
+    post:
+      tags: [identity-admin]
+      operationId: blockUser
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "204": { description: Пользователь заблокирован }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/admin/users/{id}/unblock:
+    post:
+      tags: [identity-admin]
+      operationId: unblockUser
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204": { description: Пользователь разблокирован }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/admin/users/{id}/roles/{role}:
+    parameters:
+      - $ref: "#/components/parameters/PathID"
+      - name: role
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [buyer, content_moderator, support_agent, platform_admin]
+    put:
+      tags: [identity-admin]
+      operationId: grantRole
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Роль выдана }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [identity-admin]
+      operationId: revokeRole
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Роль отозвана }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+
+  /api/v1/seller/applications:
+    post:
+      tags: [seller]
+      operationId: openSellerApplication
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegalDetails" }
+      responses:
+        "201":
+          description: Заявка создана
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  seller_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/seller/sellers:
+    get:
+      tags: [seller]
+      operationId: listMySellers
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Продавцы, где пользователь — сотрудник
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/SellerSummary" }
+  /api/v1/seller/sellers/{id}:
+    get:
+      tags: [seller]
+      operationId: getSeller
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Продавец
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Seller" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/sellers/{id}/legal-details:
+    put:
+      tags: [seller]
+      operationId: updateLegalDetails
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegalDetails" }
+      responses:
+        "204": { description: Реквизиты обновлены }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/sellers/{id}/bank-account:
+    put:
+      tags: [seller]
+      operationId: changeBankAccount
+      description: Смена банковских реквизитов блокирует выплаты до повторной верификации.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [iban, bic, bank_name, beneficiary]
+              properties:
+                iban: { type: string, example: KZ86125KZT5004100100 }
+                bic: { type: string, example: HSBKKZKX }
+                bank_name: { type: string }
+                beneficiary: { type: string }
+      responses:
+        "204": { description: Реквизиты изменены }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/sellers/{id}/documents:
+    post:
+      tags: [seller]
+      operationId: attachSellerDocument
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, object_key]
+              properties:
+                kind:
+                  type: string
+                  enum: [registration_certificate, charter, bank_confirmation, identity_document]
+                object_key: { type: string }
+      responses:
+        "204": { description: Документ прикреплён }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/sellers/{id}/submit:
+    post:
+      tags: [seller]
+      operationId: submitSellerApplication
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204": { description: Заявка отправлена на модерацию }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/sellers/{id}/members:
+    post:
+      tags: [seller]
+      operationId: addSellerMember
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, role]
+              properties:
+                user_id: { type: string, format: uuid }
+                role: { type: string, enum: [seller_admin, seller_operator] }
+      responses:
+        "204": { description: Сотрудник добавлен }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/seller/sellers/{id}/members/{user_id}:
+    delete:
+      tags: [seller]
+      operationId: removeSellerMember
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Сотрудник удалён }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+
+  /api/v1/admin/seller-applications:
+    get:
+      tags: [seller-admin]
+      operationId: listSellerApplications
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, pending_review, active, suspended, terminated]
+            default: pending_review
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Очередь модерации (старые первыми)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/SellerSummary" }
+                  page: { $ref: "#/components/schemas/PageInfo" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/admin/sellers/{id}:
+    get:
+      tags: [seller-admin]
+      operationId: getSellerAsStaff
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Продавец
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Seller" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/sellers/{id}/approve:
+    post:
+      tags: [seller-admin]
+      operationId: approveSellerApplication
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204": { description: Заявка одобрена }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/sellers/{id}/reject:
+    post:
+      tags: [seller-admin]
+      operationId: rejectSellerApplication
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "204": { description: Заявка отклонена }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/sellers/{id}/verify-bank-account:
+    post:
+      tags: [seller-admin]
+      operationId: verifySellerBankAccount
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204": { description: Реквизиты подтверждены }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/admin/sellers/{id}/suspend:
+    post:
+      tags: [seller-admin]
+      operationId: suspendSeller
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "204": { description: Продавец приостановлен }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/sellers/{id}/reinstate:
+    post:
+      tags: [seller-admin]
+      operationId: reinstateSeller
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204": { description: Продавец восстановлен }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/sellers/{id}/terminate:
+    post:
+      tags: [seller-admin]
+      operationId: terminateSeller
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "204": { description: Сотрудничество прекращено }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/sellers/{id}/commission-overrides/{category_id}:
+    parameters:
+      - $ref: "#/components/parameters/PathID"
+      - $ref: "#/components/parameters/CategoryID"
+    put:
+      tags: [seller-admin]
+      operationId: setSellerCommissionOverride
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Rate" }
+      responses:
+        "204": { description: Индивидуальная ставка установлена }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [seller-admin]
+      operationId: clearSellerCommissionOverride
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Индивидуальная ставка снята }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/admin/category-commissions/{category_id}:
+    put:
+      tags: [seller-admin]
+      operationId: setCategoryCommission
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CategoryID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Rate" }
+      responses:
+        "204": { description: Базовая ставка категории установлена }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/catalog/categories:
+    get:
+      tags: [catalog]
+      operationId: listCategories
+      description: Плоское дерево категорий, отсортированное по глубине и названию.
+      responses:
+        "200":
+          description: Дерево категорий
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/CategoryNode" }
+  /api/v1/catalog/categories/{id}:
+    get:
+      tags: [catalog]
+      operationId: getCategory
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Категория с путём и эффективной схемой атрибутов (собственные плюс унаследованные)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Category" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/catalog/categories/{id}/facets:
+    get:
+      tags: [search]
+      operationId: getCategoryFacets
+      description: Фасеты по опубликованным товарам поддерева категории с учётом текущих фильтров.
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - { name: q, in: query, schema: { type: string } }
+        - { name: filters, in: query, schema: { type: string }, description: "Список `код:значение`, значения через `|`, пары через запятую" }
+        - { name: price_min, in: query, schema: { type: integer, format: int64 } }
+        - { name: price_max, in: query, schema: { type: integer, format: int64 } }
+        - { name: seller, in: query, schema: { type: string, format: uuid } }
+        - { name: condition, in: query, schema: { type: string, enum: [new, used, refurbished] } }
+        - { name: in_stock, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Фасеты категории
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Facets" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /api/v1/catalog/products/{id}:
+    get:
+      tags: [catalog]
+      operationId: getProduct
+      description: Опубликованная карточка доступна всем; черновики и карточки на модерации — владельцу и модератору.
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Карточка товара
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/catalog/products/{id}/offers:
+    get:
+      tags: [catalog]
+      operationId: listProductOffers
+      description: Активные офферы продавцов с правом продажи, отсортированные по цене.
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Офферы товара
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Offer" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/search/products:
+    get:
+      tags: [search]
+      operationId: searchProducts
+      description: Полнотекстовый поиск с морфологией; при нулевой выдаче выполняется одна попытка исправления опечаток.
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string, format: uuid } }
+        - { name: filters, in: query, schema: { type: string } }
+        - { name: price_min, in: query, schema: { type: integer, format: int64 } }
+        - { name: price_max, in: query, schema: { type: integer, format: int64 } }
+        - { name: seller, in: query, schema: { type: string, format: uuid } }
+        - { name: condition, in: query, schema: { type: string, enum: [new, used, refurbished] } }
+        - { name: in_stock, in: query, schema: { type: boolean } }
+        - { name: sort, in: query, schema: { type: string, enum: [relevance, price_asc, price_desc, new, popular] } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Результаты поиска
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/v1/admin/catalog/categories:
+    post:
+      tags: [catalog-admin]
+      operationId: createCategory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                parent_id: { type: string, format: uuid }
+                name: { type: string, maxLength: 100 }
+                slug: { type: string, maxLength: 100 }
+      responses:
+        "201":
+          description: Категория создана
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [category_id]
+                properties:
+                  category_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/admin/catalog/categories/{id}:
+    put:
+      tags: [catalog-admin]
+      operationId: renameCategory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name: { type: string }
+                slug: { type: string }
+      responses:
+        "204": { description: Категория переименована }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/catalog/categories/{id}/attributes/{code}:
+    put:
+      tags: [catalog-admin]
+      operationId: defineCategoryAttribute
+      description: "Код атрибута уникален в пределах ветки дерева: конфликт с предком или потомком — 409."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/AttributeCode"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name: { type: string }
+                type: { type: string, enum: [string, number, boolean, enum, unit] }
+                required: { type: boolean }
+                filterable: { type: boolean }
+                options:
+                  type: array
+                  items: { type: string }
+                unit: { type: string }
+      responses:
+        "204": { description: Атрибут определён }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [catalog-admin]
+      operationId: removeCategoryAttribute
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/AttributeCode"
+      responses:
+        "204": { description: Атрибут удалён }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/catalog/moderation-queue:
+    get:
+      tags: [catalog-admin]
+      operationId: listModerationQueue
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Очередь карточек на модерации, старые первыми
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductPage" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/admin/catalog/products/{id}:
+    get:
+      tags: [catalog-admin]
+      operationId: getProductForModeration
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Карточка товара с оригиналами изображений
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/catalog/products/{id}/publish:
+    post:
+      tags: [catalog-admin]
+      operationId: publishProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204": { description: Карточка опубликована }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/admin/catalog/products/{id}/reject:
+    post:
+      tags: [catalog-admin]
+      operationId: rejectProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        "204": { description: Карточка отклонена }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/search/reindex:
+    post:
+      tags: [search-admin]
+      operationId: requestReindex
+      description: "Полная переиндексация без простоя: сборка в неактивной версии таблицы и переключение view."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Задание поставлено в очередь
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id]
+                properties:
+                  job_id: { type: string, format: uuid }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/search/reindex/{id}:
+    get:
+      tags: [search-admin]
+      operationId: getReindexJob
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Состояние задания переиндексации
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReindexJob" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/seller/sellers/{seller_id}/products:
+    post:
+      tags: [seller-catalog]
+      operationId: createProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/SellerPathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductContent" }
+      responses:
+        "201":
+          description: Карточка создана в статусе draft
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [product_id]
+                properties:
+                  product_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+    get:
+      tags: [seller-catalog]
+      operationId: listSellerProducts
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/SellerPathID"
+        - { name: status, in: query, schema: { type: string, enum: [draft, on_moderation, published, rejected] } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Карточки продавца, новые первыми
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/products/{id}:
+    get:
+      tags: [seller-catalog]
+      operationId: getSellerProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Карточка продавца
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [seller-catalog]
+      operationId: updateProduct
+      description: Редактирование доступно в статусах draft и rejected; после правки отклонённая карточка возвращается в draft.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductContent" }
+      responses:
+        "204": { description: Карточка обновлена }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/products/{id}/submit:
+    post:
+      tags: [seller-catalog]
+      operationId: submitProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204": { description: Карточка отправлена на модерацию }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/products/{id}/images:
+    post:
+      tags: [seller-catalog]
+      operationId: requestImageUpload
+      description: Возвращает presigned PUT; после загрузки файла вызывается подтверждение.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content_type, size]
+              properties:
+                content_type: { type: string, enum: ["image/jpeg", "image/png", "image/webp"] }
+                size: { type: integer, format: int64, maximum: 10485760 }
+      responses:
+        "201":
+          description: Ссылка для загрузки
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [image_id, upload]
+                properties:
+                  image_id: { type: string, format: uuid }
+                  upload: { $ref: "#/components/schemas/UploadTarget" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/products/{id}/images/{image_id}/confirm:
+    post:
+      tags: [seller-catalog]
+      operationId: confirmImageUpload
+      description: Проверяет размер и тип файла по содержимому; превью генерирует worker.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/ImageID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204": { description: Загрузка подтверждена }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/products/{id}/images/{image_id}:
+    delete:
+      tags: [seller-catalog]
+      operationId: removeProductImage
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/ImageID"
+      responses:
+        "204": { description: Изображение удалено }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/products/{id}/images/order:
+    put:
+      tags: [seller-catalog]
+      operationId: reorderProductImages
+      description: Список должен содержать все изображения карточки ровно по одному разу; первое обработанное становится обложкой.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image_ids]
+              properties:
+                image_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        "204": { description: Порядок изображений обновлён }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/sellers/{seller_id}/variant-groups:
+    post:
+      tags: [seller-catalog]
+      operationId: createVariantGroup
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/SellerPathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category_id, axes]
+              properties:
+                category_id: { type: string, format: uuid }
+                axes:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  items: { type: string }
+      responses:
+        "201":
+          description: Группа вариантов создана
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [group_id]
+                properties:
+                  group_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/variant-groups/{id}/products:
+    post:
+      tags: [seller-catalog]
+      operationId: addVariantMember
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id]
+              properties:
+                product_id: { type: string, format: uuid }
+      responses:
+        "204": { description: Карточка добавлена в группу }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/variant-groups/{id}/products/{product_id}:
+    delete:
+      tags: [seller-catalog]
+      operationId: removeVariantMember
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/ProductPathID"
+      responses:
+        "204": { description: Карточка исключена из группы }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/sellers/{seller_id}/offers:
+    post:
+      tags: [seller-catalog]
+      operationId: createOffer
+      description: Оффер создаётся только на опубликованную карточку; у продавца не более одного неархивного оффера на карточку.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/SellerPathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OfferTerms" }
+      responses:
+        "201":
+          description: Оффер создан
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [offer_id]
+                properties:
+                  offer_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+    get:
+      tags: [seller-catalog]
+      operationId: listSellerOffers
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/SellerPathID"
+        - { name: status, in: query, schema: { type: string, enum: [active, paused, archived] } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Офферы продавца, новые первыми
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OfferPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/offers/{id}:
+    put:
+      tags: [seller-catalog]
+      operationId: updateOfferTerms
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OfferTerms" }
+      responses:
+        "204": { description: Условия оффера обновлены }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/offers/{id}/status:
+    put:
+      tags: [seller-catalog]
+      operationId: setOfferStatus
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, paused, archived] }
+      responses:
+        "204": { description: Статус оффера изменён }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/offers/bulk:
+    post:
+      tags: [seller-catalog]
+      operationId: scheduleOfferImport
+      description: До 50 000 строк на задание, до 10 заданий в час на продавца. Источник — ранее загруженный объект или строки в теле запроса (до 1000).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seller_id]
+              properties:
+                seller_id: { type: string, format: uuid }
+                format: { type: string, enum: [csv, xlsx, json] }
+                object_key: { type: string }
+                rows:
+                  type: array
+                  maxItems: 1000
+                  items: { $ref: "#/components/schemas/ImportRow" }
+      responses:
+        "202":
+          description: Задание поставлено в очередь
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id]
+                properties:
+                  job_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/v1/seller/sellers/{seller_id}/offer-imports/upload:
+    post:
+      tags: [seller-catalog]
+      operationId: requestOfferImportUpload
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/SellerPathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [format, size]
+              properties:
+                format: { type: string, enum: [csv, xlsx, json] }
+                size: { type: integer, format: int64, maximum: 52428800 }
+      responses:
+        "201":
+          description: Ссылка для загрузки файла импорта
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [object_key, upload]
+                properties:
+                  object_key: { type: string }
+                  upload: { $ref: "#/components/schemas/UploadTarget" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/sellers/{seller_id}/offer-imports:
+    get:
+      tags: [seller-catalog]
+      operationId: listOfferImports
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/SellerPathID"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Задания импорта продавца, новые первыми
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportJobPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/offer-imports/{id}:
+    get:
+      tags: [seller-catalog]
+      operationId: getOfferImport
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Состояние задания с построчными ошибками и ссылкой на отчёт
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/seller/offers/{id}/stock:
+    patch:
+      tags: [inventory]
+      operationId: setOfferStock
+      description: Устанавливает доступный остаток оффера; разница пишется в журнал движений с причиной correction.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity]
+              properties:
+                quantity: { type: integer, minimum: 0 }
+                reference: { type: string, description: "Ключ синхронизации; повтор с тем же ключом не создаёт движение" }
+      responses:
+        "200":
+          description: Текущий остаток
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stock" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    get:
+      tags: [inventory]
+      operationId: getOfferStock
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Остаток оффера
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stock" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/offers/{id}/stock/movements:
+    get:
+      tags: [inventory]
+      operationId: listStockMovements
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Последние движения остатка
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/StockMovement" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/sellers/{seller_id}/stock:
+    get:
+      tags: [inventory]
+      operationId: listSellerStock
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/SellerPathID"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Остатки продавца в порядке SKU
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StockPage" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/reservations/{id}:
+    get:
+      tags: [inventory]
+      operationId: getReservation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Резерв по позициям
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reservation" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/pricing/quote:
+    post:
+      tags: [pricing]
+      operationId: quotePrices
+      description: "Котировка позиций с акциями и промокодом; для авторизованного покупателя проверяется лимит промокода на покупателя."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuoteRequest" }
+      responses:
+        "200":
+          description: Котировка с детализацией скидок
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Quote" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/seller/offers/{id}/compare-at-price:
+    put:
+      tags: [pricing]
+      operationId: setCompareAtPrice
+      description: Устанавливает цену до скидки; 0 снимает её.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [compare_at]
+              properties:
+                compare_at: { type: integer, format: int64, minimum: 0 }
+      responses:
+        "204": { description: Цена до скидки сохранена }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/pricing/promotions:
+    post:
+      tags: [pricing-admin]
+      operationId: createPromotion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PromotionInput" }
+      responses:
+        "201":
+          description: Акция создана в статусе draft
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [promotion_id]
+                properties:
+                  promotion_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    get:
+      tags: [pricing-admin]
+      operationId: listPromotions
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [draft, active, paused, ended] } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Акции, новые первыми
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PromotionPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/admin/pricing/promotions/{id}:
+    get:
+      tags: [pricing-admin]
+      operationId: getPromotion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Акция
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Promotion" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [pricing-admin]
+      operationId: updatePromotion
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PromotionInput" }
+      responses:
+        "204": { description: Акция обновлена }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/admin/pricing/promotions/{id}/status:
+    put:
+      tags: [pricing-admin]
+      operationId: setPromotionStatus
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, paused, ended] }
+      responses:
+        "204": { description: Статус акции изменён }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/admin/pricing/promo-codes:
+    post:
+      tags: [pricing-admin]
+      operationId: createPromoCode
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PromoCodeInput" }
+      responses:
+        "201":
+          description: Промокод создан
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code]
+                properties:
+                  code: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/pricing/promo-codes/{code}:
+    get:
+      tags: [pricing-admin]
+      operationId: getPromoCode
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PromoCodePath"
+      responses:
+        "200":
+          description: Промокод со счётчиком применений
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PromoCode" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/pricing/promo-codes/{code}/status:
+    put:
+      tags: [pricing-admin]
+      operationId: setPromoCodeStatus
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PromoCodePath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, disabled] }
+      responses:
+        "204": { description: Статус промокода изменён }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/cart:
+    get:
+      tags: [cart]
+      operationId: getCart
+      description: "Корзина авторизованного пользователя или устройства из X-Device-ID с актуальными ценами, наличием и доставкой по продавцам."
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DeviceID"
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/cart/items:
+    post:
+      tags: [cart]
+      operationId: addCartItem
+      description: Добавляет оффер или увеличивает количество позиции.
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DeviceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sku, quantity]
+              properties:
+                sku: { type: string, description: ID оффера }
+                quantity: { type: integer, minimum: 1, maximum: 999 }
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/cart/items/{sku}:
+    patch:
+      tags: [cart]
+      operationId: updateCartItem
+      description: Меняет количество позиции; 0 удаляет позицию.
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DeviceID"
+        - $ref: "#/components/parameters/SKUPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity]
+              properties:
+                quantity: { type: integer, minimum: 0, maximum: 999 }
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+    delete:
+      tags: [cart]
+      operationId: removeCartItem
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DeviceID"
+        - $ref: "#/components/parameters/SKUPath"
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cart/promo-code:
+    post:
+      tags: [cart]
+      operationId: applyCartPromoCode
+      description: Сохраняет промокод, если котировка корзины его принимает.
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DeviceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+    delete:
+      tags: [cart]
+      operationId: removeCartPromoCode
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DeviceID"
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+  /api/v1/cart/checkout-preview:
+    post:
+      tags: [cart]
+      operationId: previewCheckout
+      description: Корзина с расчётом доставки выбранным способом и признаком готовности к оформлению.
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DeviceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                delivery_method: { type: string, enum: [standard] }
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /api/v1/cart/merge:
+    post:
+      tags: [cart]
+      operationId: mergeCart
+      description: Переносит анонимную корзину устройства в корзину пользователя после входа.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DeviceID"
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/orders:
+    post:
+      tags: [orders]
+      operationId: placeOrder
+      description: "Оформляет заказ из корзины: резерв остатка, фиксация цен и промокода, создание платежа. Ответ содержит ссылку на страницу оплаты."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlaceOrderRequest" }
+      responses:
+        "201":
+          description: Заказ ожидает оплаты
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlacedOrder" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+    get:
+      tags: [orders]
+      operationId: listOrders
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/OrderStatus"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Заказы покупателя, новые первыми
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrderSummary" }
+                  page: { $ref: "#/components/schemas/PageInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/orders/{id}:
+    get:
+      tags: [orders]
+      operationId: getOrder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200": { $ref: "#/components/responses/Order" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/orders/{id}/cancel:
+    post:
+      tags: [orders]
+      operationId: cancelOrder
+      description: "Отмена покупателем или поддержкой до передачи в доставку; после оплаты выполняется возврат средств."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Reason" }
+      responses:
+        "200": { $ref: "#/components/responses/Order" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/payments/{id}:
+    get:
+      tags: [payments]
+      operationId: getPayment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Платёж с возвратами
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Payment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/payments/{id}/retry:
+    post:
+      tags: [payments]
+      operationId: retryPayment
+      description: Новая попытка оплаты заказа после отказа, пока не истёк срок оплаты.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Ссылка на оплату
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [order_id, payment_id, payment_url]
+                properties:
+                  order_id: { type: string, format: uuid }
+                  payment_id: { type: string, format: uuid }
+                  payment_url: { type: string, format: uri }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+  /api/v1/me/payment-methods:
+    get:
+      tags: [payments]
+      operationId: listPaymentMethods
+      description: Сохранённые способы оплаты; хранятся только токены провайдера.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Способы оплаты
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, provider, label, created_at]
+                      properties:
+                        id: { type: string, format: uuid }
+                        provider: { type: string }
+                        label: { type: string }
+                        created_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/me/payment-methods/{id}:
+    delete:
+      tags: [payments]
+      operationId: removePaymentMethod
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "204": { description: Способ оплаты удалён }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/orders:
+    get:
+      tags: [seller-orders]
+      operationId: listSellerOrders
+      description: Оплаченные и отменённые заказы с позициями продавца, без адреса покупателя.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: seller_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/OrderStatus"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Заказы продавца
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/SellerOrder" }
+                  page: { $ref: "#/components/schemas/PageInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/seller/orders/{id}/ship:
+    post:
+      tags: [seller-orders]
+      operationId: shipOrder
+      description: "Продавец отмечает заказ переданным в доставку (paid/in_fulfilment → shipped). Этап 4: ручная отметка вместо интеграции с логистикой (ADR-0018)."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "204": { description: Заказ помечен как переданный в доставку }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/seller/orders/{id}/deliver:
+    post:
+      tags: [seller-orders]
+      operationId: deliverOrder
+      description: Продавец отмечает заказ доставленным (shipped → delivered); отсчитывает срок возврата до автоматического завершения заказа.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "204": { description: Заказ помечен как доставленный }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/seller/settlements:
+    get:
+      tags: [settlement]
+      operationId: getSellerSettlements
+      description: "Начисления продавцу за завершённые заказы (за вычетом комиссии) и итоги за месяц. Этап 4: отчёт без реестра выплат (ADR-0018)."
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: seller_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: period
+          in: query
+          required: true
+          description: Календарный месяц в формате YYYY-MM
+          schema: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" }
+      responses:
+        "200":
+          description: Отчёт продавца за период
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettlementReport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/checkout-sagas:
+    get:
+      tags: [support]
+      operationId: listCheckoutSagas
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [running, compensating, completed, compensated, manual] }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Саги оформления, недавно изменённые первыми
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/CheckoutSaga" }
+                  page: { $ref: "#/components/schemas/PageInfo" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/admin/checkout-sagas/{id}/resume:
+    post:
+      tags: [support]
+      operationId: resumeCheckoutSaga
+      description: Возобновляет компенсации саги в статусе manual.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "204": { description: Компенсации выполнены }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/payments/reconciliations/{day}:
+    get:
+      tags: [support]
+      operationId: getReconciliation
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: day
+          in: path
+          required: true
+          schema: { type: string, format: date }
+        - name: provider
+          in: query
+          schema: { type: string, default: sandbox }
+      responses:
+        "200":
+          description: Отчёт сверки с провайдером
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reconciliation" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /webhooks/payments/{provider}:
+    post:
+      tags: [webhooks]
+      operationId: receivePaymentWebhook
+      description: "Вебхук провайдера: подпись в заголовке провайдера (для эмулятора X-Sandbox-Signature: t=<unix>,v1=<hex>), окно ±5 минут, allowlist адресов, тело до 64 КБ."
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Событие принято
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [received, duplicate]
+                properties:
+                  received: { type: boolean }
+                  duplicate: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    DeviceID:
+      name: X-Device-ID
+      in: header
+      description: Идентификатор устройства для анонимной корзины
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{16,128}$" }
+    SKUPath:
+      name: sku
+      in: path
+      required: true
+      schema: { type: string }
+    OrderStatus:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [created, awaiting_payment, paid, in_fulfilment, shipped, delivered, completed, cancelled, failed, returning, returned]
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    PathID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CategoryID:
+      name: category_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AttributeCode:
+      name: code
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[a-z][a-z0-9_]{0,63}$" }
+    SellerPathID:
+      name: seller_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ImageID:
+      name: image_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ProductPathID:
+      name: product_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PromoCodePath:
+      name: code
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9-]{4,32}$" }
+  headers:
+    RetryAfter:
+      schema: { type: integer }
+      description: Секунды до повторной попытки
+  responses:
+    Cart:
+      description: Корзина
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Cart" }
+    Order:
+      description: Заказ
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Order" }
+    Tokens:
+      description: Выданные токены
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Tokens" }
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: Требуется аутентификация
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: Операция запрещена
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: Конфликт состояния
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    UnprocessableEntity:
+      description: Нарушено бизнес-правило
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    TooManyRequests:
+      description: Превышен лимит запросов
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, unavailable, draining] }
+        checks:
+          type: object
+          additionalProperties: { type: string, enum: [ok, failing] }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        trace_id: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, code, message]
+            properties:
+              field: { type: string }
+              code: { type: string }
+              message: { type: string }
+    PageInfo:
+      type: object
+      required: [has_more]
+      properties:
+        next_cursor: { type: string }
+        has_more: { type: boolean }
+    Reason:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string }
+    Rate:
+      type: object
+      required: [basis_points]
+      properties:
+        basis_points: { type: integer, minimum: 0, maximum: 10000, description: "1% = 100" }
+    Tokens:
+      type: object
+      required: [token_type, user_id, session_id, access_token, access_expires_at, refresh_token, refresh_expires_at]
+      properties:
+        token_type: { type: string, enum: [Bearer] }
+        user_id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        access_token: { type: string }
+        access_expires_at: { type: string, format: date-time }
+        refresh_token: { type: string }
+        refresh_expires_at: { type: string, format: date-time }
+    Profile:
+      type: object
+      required: [id, email, email_verified, roles, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        email_verified: { type: boolean }
+        roles:
+          type: array
+          items: { type: string }
+        status: { type: string, enum: [pending_verification, active, blocked] }
+        created_at: { type: string, format: date-time }
+    Session:
+      type: object
+      required: [id, device_name, user_agent, ip, created_at, last_used_at, expires_at, current]
+      properties:
+        id: { type: string, format: uuid }
+        device_name: { type: string }
+        user_agent: { type: string }
+        ip: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        current: { type: boolean }
+    LegalDetails:
+      type: object
+      required: [legal_form, legal_name, tax_id, legal_address]
+      properties:
+        legal_form: { type: string, enum: [legal_entity, sole_proprietor] }
+        legal_name: { type: string }
+        tax_id: { type: string, pattern: "^[0-9]{12}$", description: БИН или ИИН }
+        legal_address: { type: string }
+    SellerSummary:
+      type: object
+      required: [id, status, legal_name, tax_id, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+        legal_name: { type: string }
+        tax_id: { type: string }
+        role: { type: string, enum: [seller_admin, seller_operator] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Seller:
+      type: object
+      required: [id, owner_id, status, legal_form, legal_name, tax_id, legal_address, documents, members, commission_overrides, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        status: { type: string, enum: [draft, pending_review, active, suspended, terminated] }
+        legal_form: { type: string }
+        legal_name: { type: string }
+        tax_id: { type: string }
+        legal_address: { type: string }
+        bank_account:
+          type: object
+          properties:
+            masked_iban: { type: string }
+            bic: { type: string }
+            bank_name: { type: string }
+            verified: { type: boolean }
+        documents:
+          type: array
+          items:
+            type: object
+            properties:
+              kind: { type: string }
+              object_key: { type: string }
+              uploaded_at: { type: string, format: date-time }
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id: { type: string, format: uuid }
+              role: { type: string }
+              added_at: { type: string, format: date-time }
+        commission_overrides:
+          type: object
+          additionalProperties: { type: integer }
+        rating:
+          type: object
+          properties:
+            score: { type: integer, minimum: 0, maximum: 100 }
+            provisional: { type: boolean }
+            orders: { type: integer }
+            calculated_at: { type: string, format: date-time }
+        rejection_reason: { type: string }
+        suspension_reason: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CategoryNode:
+      type: object
+      required: [id, name, slug, depth]
+      properties:
+        id: { type: string, format: uuid }
+        parent_id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        depth: { type: integer, minimum: 1, maximum: 6 }
+    Attribute:
+      type: object
+      required: [code, name, type, required, filterable, category_id]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [string, number, boolean, enum, unit] }
+        required: { type: boolean }
+        filterable: { type: boolean }
+        options:
+          type: array
+          items: { type: string }
+        unit: { type: string }
+        category_id: { type: string, format: uuid, description: Категория, в которой атрибут определён }
+    Category:
+      type: object
+      required: [id, name, slug, path, attributes, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        parent_id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        path:
+          type: array
+          items: { $ref: "#/components/schemas/CategoryNode" }
+        attributes:
+          type: array
+          items: { $ref: "#/components/schemas/Attribute" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProductContent:
+      type: object
+      required: [title]
+      properties:
+        category_id: { type: string, format: uuid, description: Обязателен при создании; при обновлении игнорируется }
+        title: { type: string, minLength: 3, maxLength: 300 }
+        description: { type: string, maxLength: 10000 }
+        brand: { type: string, maxLength: 100 }
+        attributes:
+          type: object
+          additionalProperties: { type: string }
+    ProductAttribute:
+      type: object
+      required: [code, name, type, value]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        type: { type: string }
+        value: { type: string }
+        unit: { type: string }
+    ProductImage:
+      type: object
+      required: [id, status, content_type]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [awaiting_upload, uploaded, processed] }
+        content_type: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        original_url: { type: string, format: uri, description: Только для владельца и модератора }
+        small_url: { type: string, format: uri }
+        large_url: { type: string, format: uri }
+    ProductVariants:
+      type: object
+      required: [group_id, axes, members]
+      properties:
+        group_id: { type: string, format: uuid }
+        axes:
+          type: array
+          items: { type: string }
+        members:
+          type: array
+          items:
+            type: object
+            required: [product_id, axis_values]
+            properties:
+              product_id: { type: string, format: uuid }
+              axis_values:
+                type: object
+                additionalProperties: { type: string }
+    Product:
+      type: object
+      required: [id, category_id, seller_id, title, status, attributes, images, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        brand: { type: string }
+        status: { type: string, enum: [draft, on_moderation, published, rejected] }
+        rejection_reason: { type: string }
+        attributes:
+          type: array
+          items: { $ref: "#/components/schemas/ProductAttribute" }
+        images:
+          type: array
+          items: { $ref: "#/components/schemas/ProductImage" }
+        variants: { $ref: "#/components/schemas/ProductVariants" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        published_at: { type: string, format: date-time }
+    ProductSummary:
+      type: object
+      required: [id, category_id, seller_id, title, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        title: { type: string }
+        brand: { type: string }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProductPage:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ProductSummary" }
+        page: { $ref: "#/components/schemas/PageInfo" }
+    OfferTerms:
+      type: object
+      required: [price, condition]
+      properties:
+        product_id: { type: string, format: uuid, description: Обязателен при создании оффера }
+        seller_sku: { type: string, maxLength: 64, description: Обязателен при создании оффера }
+        price: { type: integer, format: int64, minimum: 1, description: Минорные единицы валюты }
+        currency: { type: string, default: KZT }
+        condition: { type: string, enum: [new, used, refurbished] }
+        processing_days: { type: integer, minimum: 0, maximum: 30 }
+    Offer:
+      type: object
+      required: [id, product_id, seller_id, seller_sku, price, currency, condition, processing_days, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        seller_sku: { type: string }
+        price: { type: integer, format: int64 }
+        currency: { type: string }
+        condition: { type: string, enum: [new, used, refurbished] }
+        processing_days: { type: integer }
+        status: { type: string, enum: [active, paused, archived] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    OfferPage:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Offer" }
+        page: { $ref: "#/components/schemas/PageInfo" }
+    UploadTarget:
+      type: object
+      required: [method, url, expires_at]
+      properties:
+        method: { type: string, enum: [PUT] }
+        url: { type: string, format: uri }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+        expires_at: { type: string, format: date-time }
+    ImportRow:
+      type: object
+      required: [seller_sku, product_id, price, condition, processing_days]
+      properties:
+        seller_sku: { type: string }
+        product_id: { type: string, format: uuid }
+        price: { type: string }
+        currency: { type: string }
+        condition: { type: string, enum: [new, used, refurbished] }
+        processing_days: { type: string }
+        status: { type: string, enum: [active, paused] }
+    ImportJob:
+      type: object
+      required: [id, seller_id, format, status, total_rows, succeeded_rows, failed_rows, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        format: { type: string, enum: [csv, xlsx, json] }
+        status: { type: string, enum: [pending, processing, completed, failed] }
+        total_rows: { type: integer }
+        succeeded_rows: { type: integer }
+        failed_rows: { type: integer }
+        failure_reason: { type: string }
+        report_url: { type: string, format: uri }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [row, code, message]
+            properties:
+              row: { type: integer }
+              field: { type: string }
+              code: { type: string }
+              message: { type: string }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+    ImportJobPage:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/ImportJob" }
+        page: { $ref: "#/components/schemas/PageInfo" }
+    SearchHit:
+      type: object
+      required: [product_id, seller_id, category_id, title, min_price, currency, offers, sellers, in_stock, published_at]
+      properties:
+        product_id: { type: string, format: uuid }
+        seller_id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid }
+        title: { type: string }
+        brand: { type: string }
+        cover_key: { type: string }
+        min_price: { type: integer, format: int64 }
+        currency: { type: string }
+        offers: { type: integer }
+        sellers: { type: integer }
+        in_stock: { type: boolean }
+        published_at: { type: string, format: date-time }
+        rank: { type: number, format: double }
+    SearchResult:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/SearchHit" }
+        page: { $ref: "#/components/schemas/PageInfo" }
+        corrected_query: { type: string, description: Заполняется, если исходный запрос не дал результатов и был исправлен }
+    Facets:
+      type: object
+      required: [total, price_min, price_max, attributes, numbers, conditions]
+      properties:
+        total: { type: integer }
+        price_min: { type: integer, format: int64 }
+        price_max: { type: integer, format: int64 }
+        attributes:
+          type: array
+          items:
+            type: object
+            required: [code, values]
+            properties:
+              code: { type: string }
+              values:
+                type: array
+                items:
+                  type: object
+                  required: [value, count]
+                  properties:
+                    value: { type: string }
+                    count: { type: integer }
+        numbers:
+          type: array
+          items:
+            type: object
+            required: [code, min, max]
+            properties:
+              code: { type: string }
+              min: { type: number }
+              max: { type: number }
+        conditions:
+          type: array
+          items:
+            type: object
+            required: [value, count]
+            properties:
+              value: { type: string }
+              count: { type: integer }
+    ReindexJob:
+      type: object
+      required: [id, status, target, processed, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, running, completed, failed] }
+        target: { type: string, enum: [documents_a, documents_b] }
+        processed: { type: integer }
+        failure_reason: { type: string }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+    Stock:
+      type: object
+      required: [sku, available, reserved, updated_at]
+      properties:
+        sku: { type: string }
+        seller_id: { type: string, format: uuid }
+        available: { type: integer, minimum: 0 }
+        reserved: { type: integer, minimum: 0 }
+        updated_at: { type: string, format: date-time }
+    StockPage:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Stock" }
+        page: { $ref: "#/components/schemas/PageInfo" }
+    StockMovement:
+      type: object
+      required: [sku, delta, reason, reference_id, occurred_at]
+      properties:
+        sku: { type: string }
+        delta: { type: integer, description: Изменение физического остатка }
+        reason: { type: string, enum: [reserve, release, commit, restock, return, correction] }
+        reference_id: { type: string }
+        occurred_at: { type: string, format: date-time }
+    Reservation:
+      type: object
+      required: [reservation_id, status, expires_at, lines]
+      properties:
+        reservation_id: { type: string, format: uuid }
+        order_id: { type: string, format: uuid }
+        status: { type: string, enum: [held, committed, released, expired] }
+        expires_at: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [sku, quantity, status]
+            properties:
+              sku: { type: string }
+              quantity: { type: integer, minimum: 1 }
+              status: { type: string }
+    DiscountSpec:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [percentage, fixed, buy_n_get_m] }
+        basis_points: { type: integer, minimum: 1, maximum: 10000 }
+        amount: { type: integer, format: int64, minimum: 1 }
+        currency: { type: string, default: KZT }
+        buy_quantity: { type: integer, minimum: 2 }
+        free_units: { type: integer, minimum: 1 }
+    PromotionTarget:
+      type: object
+      properties:
+        skus:
+          type: array
+          items: { type: string }
+        sellers:
+          type: array
+          items: { type: string, format: uuid }
+        categories:
+          type: array
+          items: { type: string, format: uuid }
+    PromotionInput:
+      type: object
+      required: [name, discount, target]
+      properties:
+        name: { type: string, maxLength: 200 }
+        discount: { $ref: "#/components/schemas/DiscountSpec" }
+        target: { $ref: "#/components/schemas/PromotionTarget" }
+        priority: { type: integer }
+        exclusive: { type: boolean }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+    Promotion:
+      allOf:
+        - $ref: "#/components/schemas/PromotionInput"
+        - type: object
+          required: [id, status, created_at, updated_at]
+          properties:
+            id: { type: string, format: uuid }
+            status: { type: string, enum: [draft, active, paused, ended] }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    PromotionPage:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Promotion" }
+        page: { $ref: "#/components/schemas/PageInfo" }
+    PromoCodeInput:
+      type: object
+      required: [code, discount]
+      properties:
+        code: { type: string, pattern: "^[A-Za-z0-9-]{4,32}$" }
+        discount: { $ref: "#/components/schemas/DiscountSpec" }
+        min_cart_amount: { type: integer, format: int64, minimum: 0 }
+        total_limit: { type: integer, minimum: 0, description: 0 — без ограничения }
+        per_customer_limit: { type: integer, minimum: 0, description: 0 — без ограничения }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+    PromoCode:
+      allOf:
+        - $ref: "#/components/schemas/PromoCodeInput"
+        - type: object
+          required: [used, status, created_at, updated_at]
+          properties:
+            used: { type: integer }
+            status: { type: string, enum: [active, disabled] }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    QuoteRequest:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [sku, quantity]
+            properties:
+              sku: { type: string }
+              quantity: { type: integer, minimum: 1 }
+        promo_code: { type: string }
+    Quote:
+      type: object
+      required: [lines, subtotal, discount, total, currency]
+      properties:
+        lines:
+          type: array
+          items:
+            type: object
+            required: [sku, seller_id, product_id, quantity, unit_price, base, discounts, final]
+            properties:
+              sku: { type: string }
+              seller_id: { type: string, format: uuid }
+              product_id: { type: string, format: uuid }
+              quantity: { type: integer }
+              unit_price: { type: integer, format: int64 }
+              compare_at: { type: integer, format: int64 }
+              base: { type: integer, format: int64 }
+              final: { type: integer, format: int64 }
+              discounts:
+                type: array
+                items:
+                  type: object
+                  required: [rule_id, kind, amount]
+                  properties:
+                    rule_id: { type: string }
+                    kind: { type: string, enum: [percentage, fixed, buy_n_get_m, promo_code] }
+                    amount: { type: integer, format: int64 }
+                    promo_code: { type: string }
+        subtotal: { type: integer, format: int64 }
+        discount: { type: integer, format: int64 }
+        total: { type: integer, format: int64 }
+        currency: { type: string }
+        promo_code: { type: string }
+    Cart:
+      type: object
+      required: [delivery_method, groups, items_count, subtotal, discount, shipping, total, issues, ready]
+      properties:
+        cart_id: { type: string, format: uuid }
+        currency: { type: string }
+        promo_code: { type: string }
+        promo_error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+        delivery_method: { type: string }
+        groups:
+          type: array
+          items:
+            type: object
+            required: [seller_id, items, subtotal, discount, shipping, total]
+            properties:
+              seller_id: { type: string, format: uuid }
+              subtotal: { type: integer, format: int64 }
+              discount: { type: integer, format: int64 }
+              shipping: { type: integer, format: int64 }
+              total: { type: integer, format: int64 }
+              items:
+                type: array
+                items:
+                  type: object
+                  required: [sku, quantity, available, status, unit_price, saved_price, price_changed, subtotal, discount, total]
+                  properties:
+                    sku: { type: string }
+                    product_id: { type: string }
+                    title: { type: string }
+                    cover_key: { type: string }
+                    quantity: { type: integer }
+                    available: { type: integer }
+                    status: { type: string, enum: [available, insufficient_stock, unavailable] }
+                    unit_price: { type: integer, format: int64 }
+                    saved_price: { type: integer, format: int64 }
+                    price_changed: { type: boolean }
+                    compare_at: { type: integer, format: int64 }
+                    subtotal: { type: integer, format: int64 }
+                    discount: { type: integer, format: int64 }
+                    total: { type: integer, format: int64 }
+        items_count: { type: integer }
+        subtotal: { type: integer, format: int64 }
+        discount: { type: integer, format: int64 }
+        shipping: { type: integer, format: int64 }
+        total: { type: integer, format: int64 }
+        issues:
+          type: array
+          items:
+            type: object
+            required: [sku, code]
+            properties:
+              sku: { type: string }
+              code: { type: string, enum: [CART_OFFER_UNAVAILABLE, CART_QUANTITY_EXCEEDS_STOCK] }
+        ready: { type: boolean }
+        updated_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+    Address:
+      type: object
+      required: [recipient, phone, city, line]
+      properties:
+        recipient: { type: string, maxLength: 200 }
+        phone: { type: string, description: 10–15 цифр, допускаются пробелы, скобки и дефисы }
+        country: { type: string, default: KZ, minLength: 2, maxLength: 2 }
+        city: { type: string, maxLength: 100 }
+        line: { type: string, maxLength: 300 }
+        postal_code: { type: string, maxLength: 20 }
+    PlaceOrderRequest:
+      type: object
+      required: [address]
+      properties:
+        address: { $ref: "#/components/schemas/Address" }
+        delivery_method: { type: string, enum: [standard], default: standard }
+        payment:
+          type: object
+          properties:
+            method_id: { type: string, format: uuid, description: Сохранённый способ оплаты }
+            save_method: { type: boolean, description: Сохранить токен способа оплаты после успешной оплаты }
+        expected_total: { type: integer, format: int64, description: Итог из предпросмотра; при расхождении — ORDER_TOTAL_CHANGED }
+    PlacedOrder:
+      type: object
+      required: [order_id, status, payment_id, payment_url, total, currency]
+      properties:
+        order_id: { type: string, format: uuid }
+        status: { type: string, enum: [awaiting_payment] }
+        payment_id: { type: string, format: uuid }
+        payment_url: { type: string, format: uri }
+        total: { type: integer, format: int64 }
+        currency: { type: string }
+    OrderItem:
+      type: object
+      required: [sku, product_id, seller_id, title, quantity, unit_price, subtotal, discount, total]
+      properties:
+        sku: { type: string }
+        product_id: { type: string }
+        seller_id: { type: string, format: uuid }
+        title: { type: string }
+        quantity: { type: integer }
+        unit_price: { type: integer, format: int64 }
+        subtotal: { type: integer, format: int64 }
+        discount: { type: integer, format: int64 }
+        total: { type: integer, format: int64 }
+    OrderPart:
+      type: object
+      required: [seller_id, subtotal, discount, shipping, total]
+      properties:
+        seller_id: { type: string, format: uuid }
+        subtotal: { type: integer, format: int64 }
+        discount: { type: integer, format: int64 }
+        shipping: { type: integer, format: int64 }
+        total: { type: integer, format: int64 }
+    Order:
+      type: object
+      required: [id, status, address, delivery_method, currency, subtotal, discount, shipping, total, items, parts, history, cancellable, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+        address: { $ref: "#/components/schemas/Address" }
+        delivery_method: { type: string }
+        promo_code: { type: string }
+        currency: { type: string }
+        subtotal: { type: integer, format: int64 }
+        discount: { type: integer, format: int64 }
+        shipping: { type: integer, format: int64 }
+        total: { type: integer, format: int64 }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/OrderItem" }
+        parts:
+          type: array
+          items: { $ref: "#/components/schemas/OrderPart" }
+        history:
+          type: array
+          items:
+            type: object
+            required: [to, actor, at]
+            properties:
+              from: { type: string }
+              to: { type: string }
+              actor: { type: string, enum: [buyer, seller, support, system] }
+              reason: { type: string }
+              at: { type: string, format: date-time }
+        payment:
+          type: object
+          required: [payment_id, status]
+          properties:
+            payment_id: { type: string, format: uuid }
+            status: { type: string, enum: [created, pending, authorized, captured, failed, cancelled, refunded] }
+            redirect_url: { type: string, format: uri }
+            pay_before: { type: string, format: date-time }
+        cancellable: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    OrderSummary:
+      type: object
+      required: [id, status, currency, total, items_count, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+        currency: { type: string }
+        total: { type: integer, format: int64 }
+        items_count: { type: integer }
+        created_at: { type: string, format: date-time }
+    SellerOrder:
+      type: object
+      required: [id, status, currency, items, part, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+        currency: { type: string }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/OrderItem" }
+        part: { $ref: "#/components/schemas/OrderPart" }
+        created_at: { type: string, format: date-time }
+    CheckoutSaga:
+      type: object
+      required: [order_id, buyer_id, status, step, reservation_id, payment_id, attempts, compensated, deadline, updated_at]
+      properties:
+        order_id: { type: string, format: uuid }
+        buyer_id: { type: string, format: uuid }
+        status: { type: string, enum: [running, compensating, completed, compensated, manual] }
+        step: { type: string }
+        reservation_id: { type: string }
+        payment_id: { type: string }
+        reason: { type: string }
+        last_error: { type: string }
+        attempts: { type: integer }
+        compensated:
+          type: array
+          items: { type: string, enum: [cancel_payment, refund_payment, return_stock, release_promo, close_order] }
+        deadline: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Payment:
+      type: object
+      required: [id, order_id, provider, status, currency, amount, authorized, captured, refunded, refunds, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        order_id: { type: string, format: uuid }
+        provider: { type: string }
+        status: { type: string, enum: [created, pending, authorized, captured, failed, cancelled, refunded] }
+        currency: { type: string }
+        amount: { type: integer, format: int64 }
+        authorized: { type: integer, format: int64 }
+        captured: { type: integer, format: int64 }
+        refunded: { type: integer, format: int64 }
+        redirect_url: { type: string, format: uri }
+        failure_reason: { type: string }
+        refunds:
+          type: array
+          items:
+            type: object
+            required: [id, amount, status, created_at]
+            properties:
+              id: { type: string, format: uuid }
+              amount: { type: integer, format: int64 }
+              reason: { type: string }
+              status: { type: string, enum: [pending, succeeded, failed] }
+              created_at: { type: string, format: date-time }
+              completed_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Reconciliation:
+      type: object
+      required: [day, provider, checked, mismatches, created_at]
+      properties:
+        day: { type: string, format: date }
+        provider: { type: string }
+        checked: { type: integer }
+        mismatches:
+          type: array
+          items:
+            type: object
+            required: [provider_payment_id, field, internal, provider]
+            properties:
+              payment_id: { type: string, format: uuid }
+              provider_payment_id: { type: string }
+              field: { type: string, enum: [presence, captured, refunded] }
+              internal: { type: string }
+              provider: { type: string }
+        created_at: { type: string, format: date-time }
+    SettlementEntry:
+      type: object
+      required: [id, order_id, currency, gross, commission, net, accrued_at]
+      properties:
+        id: { type: string, format: uuid }
+        order_id: { type: string, format: uuid }
+        currency: { type: string }
+        gross: { type: integer, format: int64 }
+        commission: { type: integer, format: int64 }
+        net: { type: integer, format: int64 }
+        accrued_at: { type: string, format: date-time }
+    SettlementReport:
+      type: object
+      required: [seller_id, from, to, entries, gross, commission, net]
+      properties:
+        seller_id: { type: string, format: uuid }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        currency: { type: string }
+        gross: { type: integer, format: int64 }
+        commission: { type: integer, format: int64 }
+        net: { type: integer, format: int64 }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/SettlementEntry" }
