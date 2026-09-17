@@ -116,9 +116,6 @@ internal/<context>/      domain · application · infrastructure · api · modul
 migrations/              SQL-миграции goose (по одной на контекст/фичу)
 api/openapi              контракт REST API (marketplace.v1.yaml)
 deploy/                  docker-compose (postgres, redis, seaweedfs, сервисы)
-docs/adr                 architecture decision records
-docs/contracts           контракт каждого контекста: инварианты, HTTP, события
-docs/context-map.md      карта контекстов и правило Shared Kernel
 test/integration         интеграционные тесты (testcontainers)
 test/e2e, test/load      план на этап стабилизации
 ```
