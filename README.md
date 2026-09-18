@@ -1,12 +1,10 @@
 # Go Marketplace Backend
 
-Учебный проект: бэкенд многопродавцовой торговой площадки (marketplace) на Go — модульный монолит, спроектированный по DDD и Clean Architecture с прицелом на прод-качество: транзакционная согласованность, идемпотентность, сага оформления заказа с компенсациями, полное покрытие тестами.
+The backend of a marketplace in Go — a modular monolith designed with DDD, Outbox, ACL, Clean Architecture and aiming for production-grade quality: transactional consistency, idempotency, a checkout saga with compensations, and full test coverage.
 
-Цель проекта — не готовый к запуску продукт, а демонстрация того, как применяются архитектурные паттерны и практики (DDD, CQRS, Saga, Outbox, ACL и т. д.) в реальном по объёму бэкенде, а не в игрушечном примере на 200 строк. Часть контекстов (`shipping`, `settlement`) реализована в облегчённом виде — с портом и минимальной реализацией вместо полной интеграции с внешними системами.
+## Architecture
 
-## Архитектура
-
-**Модульный монолит.** Один деплойный юнит (`cmd/api` + `cmd/worker`), но код разделён на независимые ограниченные контексты (bounded contexts) со своими схемами БД и явными портами наружу (`internal/<context>/api`). Контексты общаются только через порты и доменные события — не через прямой импорт чужих `domain`/`application`/`infrastructure` пакетов (это правило зафиксировано в `.golangci.yml` через `depguard`, отдельный список запретов на каждый контекст).
+**Modular monolith.** A single deployable unit (`cmd/api` + `cmd/worker`), but the code is split into independent bounded contexts, each with its own database schema and explicit outward-facing ports (`internal/<context>/api`). Contexts communicate only through ports and domain events — not by directly importing another context's `domain`/`application`/`infrastructure` packages (this rule is enforced in `.golangci.yml` via `depguard`, with a separate deny list for each context).
 
 ```
                             ┌──────────────┐
@@ -30,50 +28,48 @@
         │                          ┌──────▼──┐ ┌───▼────┐
         │                          │ payment │ │shipping│
         │                          └────┬────┘ └───┬────┘
-        │                               │ ACL      │ ACL (порт, этап 5)
+        │                               │ ACL      │ ACL (port, stage 5)
         │                          ┌────▼────┐ ┌───▼───────────┐
-        │                          │  PSP    │ │ Delivery API  │ (внешние)
+        │                          │  PSP    │ │ Delivery API  │ (external)
         │                          └─────────┘ └───────────────┘
    ┌────▼────────┐
    │ settlement  │◄── ordering.order_completed.v1
    └─────────────┘
 ```
 
-Каждый контекст внутри устроен по слоям Clean Architecture:
+Inside, each context is organized into Clean Architecture layers:
 
 ```
 internal/<context>/
-├── domain/           агрегаты, value objects, доменные события, порты репозиториев
-├── application/      команды и запросы (CQRS), порты к другим контекстам
-├── infrastructure/   postgres, memory (для тестов), httpapi, внешние адаптеры
-├── api/              публичный контракт контекста: DTO событий и интерфейсы для других контекстов
-├── module.go         сборка зависимостей, регистрация HTTP-маршрутов
-└── worker.go         подписки на события и фоновые задачи
+├── domain/           aggregates, value objects, domain events, repository ports
+├── application/      commands and queries (CQRS), ports to other contexts
+├── infrastructure/   postgres, memory (for tests), httpapi, external adapters
+├── api/              the context's public contract: event DTOs and interfaces for other contexts
+├── module.go         dependency wiring, HTTP route registration
+└── worker.go         event subscriptions and background jobs
 ```
 
-Зависимости идут только внутрь и через `api`: `infrastructure` знает про `domain` и `application`, `application` знает про `domain`, `domain` не знает ни про что снаружи стандартной библиотеки и `shared/kernel`.
+## Tech Stack
 
-## Технологический стек
+| Component | Technology | Why |
+|-----------|-----------|-----|
+| Language | Go 1.26 | |
+| HTTP | standard `net/http` (`http.ServeMux` with `METHOD /path/{param}` patterns) | No third-party routers — routing by method and path parameters has been in the standard library since Go 1.22 |
+| Database | PostgreSQL 16 | Transactions, JSONB, maturity |
+| DB driver | `pgx/v5` | Control over SQL; the domain doesn't leak into tables |
+| Migrations | `goose` | Versioned SQL migrations |
+| Cache / sessions / rate limiting | Redis 7 | |
+| Event delivery | Transactional Outbox + dispatcher in `cmd/worker` (PostgreSQL only) | No external message broker |
+| Search | PostgreSQL FTS (`tsvector`, `russian` configuration) + `pg_trgm` | Full-text search with morphology and typo tolerance without a separate search cluster |
+| Object storage | SeaweedFS (S3-compatible API), `aws-sdk-go-v2` client | Media and import files via presigned URLs |
+| Payment provider | `payment.Provider` port + built-in PSP emulator (`internal/payment/infrastructure/psp/sandbox`) | End-to-end payments and failure testing without an external dependency; a real provider is a new adapter for the same port |
+| Logs | `log/slog`, JSON | |
+| Metrics | Prometheus | |
+| Tracing | OpenTelemetry | |
+| Tests | `testing`, `testify`, `testcontainers-go` | Integration tests on real PostgreSQL rather than mocks |
+| Linter | `golangci-lint` | Including `depguard` to enforce context boundaries and `gocyclo`/`funlen` for complexity |
 
-| Компонент | Технология | Почему |
-|-----------|-----------|--------|
-| Язык | Go 1.26 | |
-| HTTP | стандартный `net/http` (`http.ServeMux` с шаблонами `METHOD /path/{param}`) | Без сторонних роутеров — маршрутизация по методу и параметрам пути есть в стандартной библиотеке с Go 1.22 |
-| БД | PostgreSQL 16 | Транзакции, JSONB, зрелость |
-| Драйвер БД | `pgx/v5` | Контроль над SQL, домен не утекает в таблицы |
-| Миграции | `goose` | Версионируемые SQL-миграции |
-| Кэш / сессии / rate limit | Redis 7 | |
-| Доставка событий | Transactional Outbox + диспетчер в `cmd/worker` (только PostgreSQL) | Без внешнего брокера сообщений |
-| Поиск | PostgreSQL FTS (`tsvector`, конфигурация `russian`) + `pg_trgm` | Полнотекст с морфологией и исправлением опечаток без отдельного поискового кластера |
-| Объектное хранилище | SeaweedFS (S3-совместимое API), клиент `aws-sdk-go-v2` | Медиафайлы и файлы импорта через presigned URL |
-| Платёжный провайдер | Порт `payment.Provider` + встроенный эмулятор PSP (`internal/payment/infrastructure/psp/sandbox`) | Сквозная оплата и тесты отказов без внешней зависимости; реальный провайдер — новый адаптер того же порта |
-| Логи | `log/slog`, JSON | |
-| Метрики | Prometheus | |
-| Трейсинг | OpenTelemetry | |
-| Тесты | `testing`, `testify`, `testcontainers-go` | Интеграционные тесты на реальном PostgreSQL, а не на моках |
-| Линтер | `golangci-lint` | В т.ч. `depguard` для соблюдения границ контекстов и `gocyclo`/`funlen` для сложности |
-
-## Быстрый старт
+## Quick Start
 
 ```bash
 cp .env.example .env
@@ -83,39 +79,35 @@ make run-api
 curl localhost:8080/readyz
 ```
 
-Оплата на стендах идёт через встроенный эмулятор PSP (`PSP_PROVIDER=sandbox`): `payment_url` из ответа `POST /api/v1/orders` открывает страницу `/sandbox/psp/pay/{id}` с кнопками «Оплатить» и «Отклонить», эмулятор отправляет подписанный вебхук на `/webhooks/payments/sandbox`.
-
-Полный стенд в контейнерах:
+Full environment in containers:
 
 ```bash
 docker compose -f deploy/docker-compose.yml --profile app up --build
 ```
 
-## Проверки
+## Checks
 
 ```bash
 make lint          # golangci-lint
-make test          # unit-тесты, -race
-make test-integration  # интеграционные тесты на testcontainers (PostgreSQL, SeaweedFS)
-make cover-gate     # unit + integration coverage, пороги: domain 90%, application 75%, total 70%
+make test          # unit tests, -race
+make test-integration  # integration tests on testcontainers (PostgreSQL, SeaweedFS)
+make cover-gate     # unit + integration coverage, thresholds: domain 90%, application 75%, total 70%
 make vuln           # govulncheck
 ```
 
-Интеграционные тесты сами поднимают PostgreSQL и SeaweedFS через testcontainers; для внешних сервисов можно задать `TEST_DATABASE_URL` и `TEST_S3_ENDPOINT`.
+Current status: `golangci-lint` — 0 issues, `govulncheck` — 0 applicable vulnerabilities, coverage: domain 95.9% / application 90.4% / total 85.1%.
 
-Текущее состояние: `golangci-lint` — 0 замечаний, `govulncheck` — 0 применимых уязвимостей, покрытие domain 95.9% / application 90.4% / total 85.1%.
-
-## Структура репозитория
+## Repository Structure
 
 ```
-cmd/                     точки входа процессов (api, worker, migrate)
-internal/shared/kernel   Shared Kernel: Money, Quantity, BasisPoints, ID[T], DomainEvent, ошибки
-internal/shared/platform технические компоненты: postgres/UoW, outbox, inbox, idempotency,
+cmd/                     process entry points (api, worker, migrate)
+internal/shared/kernel   Shared Kernel: Money, Quantity, BasisPoints, ID[T], DomainEvent, errors
+internal/shared/platform technical components: postgres/UoW, outbox, inbox, idempotency,
                          httpx, auth, ratelimit, cqrs, observability, scheduler, breaker, audit
 internal/<context>/      domain · application · infrastructure · api · module.go · worker.go
-migrations/              SQL-миграции goose (по одной на контекст/фичу)
-api/openapi              контракт REST API (marketplace.v1.yaml)
-deploy/                  docker-compose (postgres, redis, seaweedfs, сервисы)
-test/integration         интеграционные тесты (testcontainers)
-test/e2e, test/load      план на этап стабилизации
+migrations/              goose SQL migrations (one per context/feature)
+api/openapi              REST API contract (marketplace.v1.yaml)
+deploy/                  docker-compose (postgres, redis, seaweedfs, services)
+test/integration         integration tests (testcontainers)
+test/e2e, test/load      planned for the stabilization stage
 ```
